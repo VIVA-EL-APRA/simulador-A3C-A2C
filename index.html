@@ -1,1 +1,760 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simulador Avanzado A2C / A3C - Reinforcement Learning</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+    
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #0f172a; /* slate-900 */
+      color: #f8fafc; /* slate-50 */
+    }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #1e293b; }
+    ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #64748b; }
 
+    /* Custom Animations */
+    @keyframes pulse-border {
+      0% { border-color: rgba(59, 130, 246, 0.5); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
+      70% { border-color: rgba(59, 130, 246, 1); box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
+      100% { border-color: rgba(59, 130, 246, 0.5); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+    }
+    
+    @keyframes flash-update {
+      0% { background-color: rgba(234, 179, 8, 0.3); }
+      100% { background-color: transparent; }
+    }
+
+    .updating-flash {
+      animation: flash-update 0.5s ease-out;
+    }
+
+    .barrier-active {
+      background: repeating-linear-gradient(
+        45deg,
+        rgba(239, 68, 68, 0.1),
+        rgba(239, 68, 68, 0.1) 10px,
+        rgba(239, 68, 68, 0.2) 10px,
+        rgba(239, 68, 68, 0.2) 20px
+      );
+      border: 1px solid #ef4444;
+    }
+
+    /* CartPole Styles */
+    .cart {
+      transition: left 0.05s linear;
+    }
+    .pole {
+      transform-origin: bottom center;
+      transition: transform 0.05s linear;
+    }
+    
+    .glass-panel {
+      background: rgba(30, 41, 59, 0.7);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+</head>
+<body class="min-h-screen p-4 md:p-6 lg:p-8 flex flex-col gap-6">
+
+  <!-- Header -->
+  <header class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800 pb-6">
+    <div>
+      <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400">
+        Simulador A3C / A2C
+      </h1>
+      <p class="text-slate-400 mt-1 text-sm md:text-base">
+        Entrenamiento Paralelo Actor-Crítico en Entornos CartPole Virtuales
+      </p>
+    </div>
+    
+    <div class="flex gap-3 bg-slate-800 p-1.5 rounded-lg border border-slate-700">
+      <button id="btn-a2c" onclick="setMode('A2C')" class="px-4 py-2 rounded-md text-sm font-semibold transition-all bg-blue-600 text-white shadow-lg">
+        A2C (Síncrono)
+      </button>
+      <button id="btn-a3c" onclick="setMode('A3C')" class="px-4 py-2 rounded-md text-sm font-semibold transition-all hover:bg-slate-700 text-slate-300">
+        A3C (Asíncrono)
+      </button>
+    </div>
+  </header>
+
+  <!-- Controls & Stats -->
+  <div class="grid grid-cols-1 md:grid-cols-12 gap-6">
+    <!-- Controls -->
+    <div class="md:col-span-4 lg:col-span-3 glass-panel rounded-xl p-5 flex flex-col gap-4">
+      <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Controles de Simulación</h2>
+      
+      <button id="btn-toggle" onclick="toggleSimulation()" class="w-full py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white rounded-lg font-semibold flex justify-center items-center gap-2 shadow-lg shadow-emerald-500/20 transition-all">
+        <svg id="icon-play" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+        <svg id="icon-pause" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+        <span id="lbl-toggle">Iniciar Entrenamiento</span>
+      </button>
+
+      <button onclick="resetSimulation()" class="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 rounded-lg font-medium transition-all text-sm">
+        Reiniciar Pesos y Entornos
+      </button>
+
+      <div class="mt-2">
+        <label class="text-xs text-slate-400 flex justify-between mb-2">
+          <span>Velocidad de Simulación</span>
+          <span id="speed-val" class="text-emerald-400 font-mono">1x</span>
+        </label>
+        <input type="range" id="speed-slider" min="1" max="10" value="2" class="w-full accent-emerald-500">
+      </div>
+
+      <div id="mode-desc" class="mt-auto p-3 bg-slate-800/50 rounded-lg text-xs text-slate-400 border border-slate-700/50 leading-relaxed">
+        <strong>A2C Síncrono:</strong> Los 6 workers ejecutan 5 pasos. La red global espera a que TODOS terminen para promediar gradientes y actualizarse.
+      </div>
+    </div>
+
+    <!-- Global Stats -->
+    <div class="md:col-span-8 lg:col-span-9 grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="glass-panel rounded-xl p-5 flex flex-col justify-center border-l-4 border-blue-500">
+        <span class="text-xs text-slate-400 font-medium uppercase tracking-wider">Actualizaciones Globales</span>
+        <span id="stat-updates" class="text-3xl font-bold font-mono mt-1 text-white">0</span>
+      </div>
+      <div class="glass-panel rounded-xl p-5 flex flex-col justify-center border-l-4 border-emerald-500">
+        <span class="text-xs text-slate-400 font-medium uppercase tracking-wider">Episodios Totales</span>
+        <span id="stat-eps" class="text-3xl font-bold font-mono mt-1 text-white">0</span>
+      </div>
+      <div class="glass-panel rounded-xl p-5 flex flex-col justify-center border-l-4 border-yellow-500">
+        <span class="text-xs text-slate-400 font-medium uppercase tracking-wider">Recompensa Media (10 ep)</span>
+        <span id="stat-rew" class="text-3xl font-bold font-mono mt-1 text-white">0.0</span>
+      </div>
+      <div class="glass-panel rounded-xl p-5 flex flex-col justify-center border-l-4 border-purple-500">
+        <span class="text-xs text-slate-400 font-medium uppercase tracking-wider">Entropía Promedio H(π)</span>
+        <span id="stat-ent" class="text-3xl font-bold font-mono mt-1 text-white">0.69</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Architecture Grid -->
+  <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-grow">
+    
+    <!-- Workers Area (Left) -->
+    <div class="lg:col-span-7 flex flex-col gap-4">
+      <div class="flex justify-between items-end">
+        <h2 class="text-lg font-semibold text-slate-200">Workers Paralelos <span class="text-xs bg-slate-700 px-2 py-1 rounded text-slate-300 ml-2">n = 6</span></h2>
+        <div id="sync-status" class="text-xs font-mono font-bold px-3 py-1 rounded-full bg-slate-800 text-slate-400 border border-slate-700 transition-colors">
+          Estado: Esperando
+        </div>
+      </div>
+      
+      <div class="grid grid-cols-2 md:grid-cols-3 gap-4" id="workers-container">
+        <!-- Worker cards will be injected by JS -->
+      </div>
+    </div>
+
+    <!-- Global Network Area (Right) -->
+    <div class="lg:col-span-5 flex flex-col gap-4">
+      <h2 class="text-lg font-semibold text-slate-200">Red Neuronal Global Compartida</h2>
+      
+      <div id="global-net-panel" class="glass-panel rounded-xl p-5 flex flex-col gap-6 relative overflow-hidden transition-colors duration-300">
+        
+        <!-- Actor Network -->
+        <div class="bg-slate-800/80 rounded-lg p-4 border border-blue-900/50 shadow-inner relative">
+          <div class="absolute -left-1 top-4 bottom-4 w-1 bg-blue-500 rounded-r"></div>
+          <h3 class="text-sm font-bold text-blue-400 mb-2 flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            Actor π(a|s) - Política
+          </h3>
+          <p class="text-xs text-slate-400 mb-2">Aprende a qué acciones tomar para maximizar la recompensa futura.</p>
+          <div class="font-mono text-xs bg-slate-900 p-2 rounded text-slate-300 break-words">
+            W_actor += α * ∇θ log π(a|s) * <span class="text-yellow-400">A(s,t)</span> + β * ∇θ H(π)
+          </div>
+        </div>
+
+        <!-- Critic Network -->
+        <div class="bg-slate-800/80 rounded-lg p-4 border border-emerald-900/50 shadow-inner relative">
+          <div class="absolute -left-1 top-4 bottom-4 w-1 bg-emerald-500 rounded-r"></div>
+          <h3 class="text-sm font-bold text-emerald-400 mb-2 flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            Crítico V(s) - Función de Valor
+          </h3>
+          <p class="text-xs text-slate-400 mb-2">Aprende a evaluar qué tan "bueno" es estar en el estado actual.</p>
+          <div class="font-mono text-xs bg-slate-900 p-2 rounded text-slate-300 break-words">
+            W_critic += α * ∇w (G_t - V(s))²
+          </div>
+        </div>
+
+        <!-- Live Metrics -->
+        <div>
+          <h4 class="text-xs font-semibold text-slate-500 uppercase mb-3">Métricas de la última actualización</h4>
+          <div class="grid grid-cols-3 gap-2 text-center">
+            <div class="bg-slate-900/50 p-2 rounded border border-slate-700">
+              <div class="text-[10px] text-slate-400">Loss Actor</div>
+              <div id="metric-la" class="font-mono text-sm text-blue-400 mt-1">0.000</div>
+            </div>
+            <div class="bg-slate-900/50 p-2 rounded border border-slate-700">
+              <div class="text-[10px] text-slate-400">Loss Crítico</div>
+              <div id="metric-lc" class="font-mono text-sm text-emerald-400 mt-1">0.000</div>
+            </div>
+            <div class="bg-slate-900/50 p-2 rounded border border-slate-700">
+              <div class="text-[10px] text-slate-400">Ventaja Media</div>
+              <div id="metric-adv" class="font-mono text-sm text-yellow-400 mt-1">0.000</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chart -->
+      <div class="glass-panel rounded-xl p-4 mt-auto">
+        <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Curva de Aprendizaje (Recompensa)</h2>
+        <div class="h-32 w-full relative">
+          <canvas id="rewardChart"></canvas>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    // --- Configuración y Constantes ---
+    const N_WORKERS = 6;
+    const STEPS_PER_UPDATE = 5;
+    const GAMMA = 0.99;
+    const BETA = 0.01; // Coeficiente de Entropía
+    const LR_ACTOR = 0.01;
+    const LR_CRITIC = 0.05;
+
+    // --- Estado Global ---
+    let mode = 'A2C'; // 'A2C' o 'A3C'
+    let isRunning = false;
+    let globalWeights = {
+      actorX: 0.1, actorTh: 1.0, actorBias: 0,
+      criticX: 0.1, criticTh: 1.0, criticBias: 0,
+      iter: 0
+    };
+    let globalStats = {
+      updates: 0,
+      episodes: 0,
+      rewardHistory: [],
+      rewardBuffer: []
+    };
+
+    let workers = [];
+    let lastTimestamp = 0;
+    let simulationSpeed = 2; // Multiplicador
+    let animationFrameId;
+    let chartInstance;
+
+    // --- Entorno CartPole Simulado ---
+    // Física básica de péndulo invertido para visualización rápida en JS.
+    class CartPoleEnv {
+      constructor() { this.reset(); }
+      reset() {
+        this.x = (Math.random() - 0.5) * 0.1;
+        this.xDot = 0;
+        this.th = (Math.random() - 0.5) * 0.1;
+        this.thDot = 0;
+        this.steps = 0;
+        this.done = false;
+        return this.state;
+      }
+      get state() { return { x: this.x, th: this.th, done: this.done }; }
+      step(action) {
+        if (this.done) return { r: 0, done: true, state: this.state };
+        const force = action === 1 ? 10 : -10;
+        const mc = 1.0, mp = 0.1, l = 0.5, g = 9.8, dt = 0.02;
+        const costh = Math.cos(this.th);
+        const sinth = Math.sin(this.th);
+        
+        const temp = (force + mp * l * this.thDot * this.thDot * sinth) / (mc + mp);
+        const thAcc = (g * sinth - costh * temp) / (l * (4.0 / 3.0 - mp * costh * costh / (mc + mp)));
+        const xAcc = temp - mp * l * thAcc * costh / (mc + mp);
+        
+        this.x += dt * this.xDot;
+        this.xDot += dt * xAcc;
+        this.th += dt * this.thDot;
+        this.thDot += dt * thAcc;
+        this.steps++;
+        
+        this.done = Math.abs(this.x) > 2.4 || Math.abs(this.th) > 0.209 || this.steps >= 200;
+        return { r: this.done ? 0 : 1, done: this.done, state: this.state };
+      }
+    }
+
+    // --- Redes Neuronales (Simuladas con transformaciones lineales para eficiencia JS) ---
+    function softmax(logits) {
+      const maxLogit = Math.max(...logits);
+      const exps = logits.map(l => Math.exp(l - maxLogit));
+      const sum = exps.reduce((a, b) => a + b, 0);
+      return exps.map(e => e / sum);
+    }
+
+    function getActorProbs(state) {
+      // Política simple lineal
+      const logit = state.x * globalWeights.actorX + state.th * globalWeights.actorTh + globalWeights.actorBias;
+      return softmax([-logit, logit]); // [Prob(Izq), Prob(Der)]
+    }
+
+    function getCriticValue(state) {
+      // Valor del estado simple lineal
+      return state.x * globalWeights.criticX + state.th * globalWeights.criticTh + globalWeights.criticBias;
+    }
+
+    function calculateEntropy(probs) {
+      return -probs.reduce((sum, p) => sum + (p > 1e-8 ? p * Math.log(p) : 0), 0);
+    }
+
+    // --- Inicialización ---
+    function initWorkers() {
+      const container = document.getElementById('workers-container');
+      container.innerHTML = '';
+      workers = [];
+      
+      for (let i = 0; i < N_WORKERS; i++) {
+        const worker = {
+          id: i,
+          env: new CartPoleEnv(),
+          bufferSteps: 0,
+          totalReward: 0,
+          localEpisodes: 0,
+          speedMult: 0.8 + Math.random() * 0.4, // Para desincronizar en A3C
+          timeAccumulator: 0,
+          statesBuffer: [],
+          rewardsBuffer: [],
+          actionsBuffer: []
+        };
+        workers.push(worker);
+        
+        // Crear UI del worker
+        const el = document.createElement('div');
+        el.className = 'glass-panel rounded-xl p-3 flex flex-col gap-2 relative transition-all duration-200 border-2 border-transparent';
+        el.id = `worker-${i}`;
+        el.innerHTML = `
+          <div class="flex justify-between items-center mb-1">
+            <span class="text-xs font-bold text-slate-300 flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" id="dot-${i}"></span>
+              Worker ${i + 1}
+            </span>
+            <span class="text-[10px] font-mono text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded">Ep: <span id="w-ep-${i}">0</span></span>
+          </div>
+          
+          <!-- Visualizador del CartPole -->
+          <div class="h-16 bg-slate-900 rounded border border-slate-700 relative overflow-hidden flex items-end justify-center pb-2">
+            <div class="absolute bottom-2 w-full h-[1px] bg-slate-700"></div>
+            <div id="w-cart-${i}" class="cart absolute bottom-1.5 w-6 h-3 bg-blue-500 rounded-sm z-10" style="left: 50%; transform: translateX(-50%);">
+              <div id="w-pole-${i}" class="pole absolute bottom-full left-1/2 w-1.5 h-10 bg-slate-300 -ml-[0.1875rem] rounded-t-sm"></div>
+            </div>
+          </div>
+
+          <!-- Progreso Local -->
+          <div>
+            <div class="flex justify-between text-[9px] text-slate-400 mb-0.5">
+              <span>Buffer Steps</span>
+              <span id="w-buf-txt-${i}">0 / ${STEPS_PER_UPDATE}</span>
+            </div>
+            <div class="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+              <div id="w-buf-bar-${i}" class="h-full bg-blue-500 w-0 transition-all duration-100"></div>
+            </div>
+          </div>
+
+          <!-- Info Acción -->
+          <div class="text-[10px] text-slate-400 flex justify-between mt-1">
+            <span>R: <span id="w-rew-${i}" class="font-mono text-white">0</span></span>
+            <span>P(D): <span id="w-prob-${i}" class="font-mono text-white">50%</span></span>
+          </div>
+        `;
+        container.appendChild(el);
+      }
+    }
+
+    // --- Lógica del Bucle Principal ---
+    function loop(timestamp) {
+      if (!isRunning) {
+        lastTimestamp = timestamp;
+        animationFrameId = requestAnimationFrame(loop);
+        return;
+      }
+      
+      const dt = Math.min((timestamp - lastTimestamp) / 1000, 0.1); // max 100ms dt
+      lastTimestamp = timestamp;
+      
+      // Ajuste de velocidad (1x = ~20 steps por segundo por worker)
+      const targetStepTime = 0.05 / simulationSpeed; 
+
+      if (mode === 'A2C') {
+        // Lógica SÍNCRONA
+        let allReady = true;
+        
+        workers.forEach(w => {
+          if (w.bufferSteps < STEPS_PER_UPDATE) {
+            allReady = false;
+            w.timeAccumulator += dt;
+            if (w.timeAccumulator >= targetStepTime) {
+              stepWorker(w);
+              w.timeAccumulator = 0;
+            }
+          }
+        });
+
+        const syncStatus = document.getElementById('sync-status');
+        if (allReady) {
+          syncStatus.textContent = 'Barrera: Actualizando Global...';
+          syncStatus.className = 'text-xs font-mono font-bold px-3 py-1 rounded-full bg-yellow-500/20 text-yellow-400 border border-yellow-500 animate-pulse';
+          
+          document.getElementById('workers-container').classList.add('barrier-active');
+
+          // Simular pequeño retardo de red/cómputo para la actualización A2C
+          isRunning = false; 
+          setTimeout(() => {
+            performGlobalUpdate(workers); // Actualiza con todos
+            workers.forEach(w => {
+              w.bufferSteps = 0;
+              w.statesBuffer = []; w.rewardsBuffer = []; w.actionsBuffer = [];
+              updateWorkerUI(w);
+            });
+            document.getElementById('workers-container').classList.remove('barrier-active');
+            syncStatus.textContent = 'Estado: Corriendo síncrono';
+            syncStatus.className = 'text-xs font-mono font-bold px-3 py-1 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500';
+            isRunning = true;
+            lastTimestamp = performance.now(); // reset timer
+          }, 400 / simulationSpeed);
+        } else {
+            let waitingCount = workers.filter(w => w.bufferSteps === STEPS_PER_UPDATE).length;
+            if(waitingCount > 0) {
+               syncStatus.textContent = `Estado: Esperando (${waitingCount}/${N_WORKERS})`;
+               syncStatus.className = 'text-xs font-mono font-bold px-3 py-1 rounded-full bg-orange-500/20 text-orange-400 border border-orange-500';
+            } else {
+               syncStatus.textContent = 'Estado: Corriendo síncrono';
+               syncStatus.className = 'text-xs font-mono font-bold px-3 py-1 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500';
+            }
+        }
+
+      } else {
+        // Lógica ASÍNCRONA (A3C)
+        document.getElementById('sync-status').textContent = 'Estado: Corriendo asíncrono (A3C)';
+        document.getElementById('sync-status').className = 'text-xs font-mono font-bold px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500';
+
+        workers.forEach(w => {
+          // Cada worker corre a su propia velocidad simulada
+          w.timeAccumulator += dt * w.speedMult;
+          if (w.timeAccumulator >= targetStepTime) {
+            stepWorker(w);
+            w.timeAccumulator = 0;
+            
+            // Si ESTE worker termina su bloque, actualiza global inmediatamente sin bloquear a otros
+            if (w.bufferSteps >= STEPS_PER_UPDATE) {
+              flashWorker(w.id);
+              performGlobalUpdate([w]); // Actualiza solo con su info
+              w.bufferSteps = 0;
+              w.statesBuffer = []; w.rewardsBuffer = []; w.actionsBuffer = [];
+            }
+          }
+        });
+      }
+
+      animationFrameId = requestAnimationFrame(loop);
+    }
+
+    // --- Funciones Core RL ---
+    function stepWorker(w) {
+      const state = w.env.state;
+      const probs = getActorProbs(state);
+      
+      // Muestrear acción (0=Izq, 1=Der)
+      const action = Math.random() < probs[0] ? 0 : 1;
+      
+      const { r, done, state: nextState } = w.env.step(action);
+      
+      w.statesBuffer.push(state);
+      w.actionsBuffer.push(action);
+      w.rewardsBuffer.push(r);
+      w.totalReward += r;
+      w.bufferSteps++;
+
+      if (done) {
+        w.localEpisodes++;
+        globalStats.episodes++;
+        globalStats.rewardBuffer.push(w.totalReward);
+        w.totalReward = 0;
+        w.env.reset();
+        
+        // Forzar actualización si termina episodio
+        w.bufferSteps = STEPS_PER_UPDATE; 
+      }
+      
+      updateWorkerUI(w, probs[1]);
+    }
+
+    function performGlobalUpdate(updatingWorkers) {
+      globalStats.updates++;
+      globalWeights.iter++;
+
+      let totalAdvantage = 0;
+      let totalLossActor = 0;
+      let totalLossCritic = 0;
+      let totalEntropy = 0;
+      let count = 0;
+
+      // Simplificación algorítmica para demostración visual
+      updatingWorkers.forEach(w => {
+        if(w.statesBuffer.length === 0) return;
+        
+        const lastState = w.statesBuffer[w.statesBuffer.length - 1];
+        // Valor del estado de arranque (G_t simple)
+        const R = w.env.state.done ? 0 : getCriticValue(w.env.state);
+        let G = R;
+
+        // Calcular retornos hacia atrás
+        for (let i = w.rewardsBuffer.length - 1; i >= 0; i--) {
+          G = w.rewardsBuffer[i] + GAMMA * G;
+          const s = w.statesBuffer[i];
+          const V = getCriticValue(s);
+          const advantage = G - V;
+          
+          const probs = getActorProbs(s);
+          const entropy = calculateEntropy(probs);
+          
+          totalAdvantage += advantage;
+          totalLossCritic += advantage * advantage;
+          totalEntropy += entropy;
+          count++;
+
+          // Actualización de pesos simulada (simplificada y guiada para que "aprenda" visualmente)
+          // Usamos heurísticas simples para estabilizar la simulación JS
+          const gradSign = advantage > 0 ? 1 : -1;
+          const a = w.actionsBuffer[i];
+          
+          // Aprender a mantener el palo derecho (th=0) y en el centro (x=0)
+          const thCorrection = s.th > 0 ? -0.05 : 0.05; 
+          globalWeights.actorTh += LR_ACTOR * advantage * s.th * (a === 1 ? 1 : -1) * 0.1;
+          globalWeights.criticTh += LR_CRITIC * advantage * s.th * 0.1;
+        }
+      });
+
+      // Efecto visual de mejora continua artificial (solo para la demo)
+      globalWeights.actorTh = Math.min(Math.max(globalWeights.actorTh, -5), 5); 
+      // Forzar que poco a poco se vuelva "más inteligente"
+      if(globalStats.updates % 10 === 0) {
+         globalWeights.actorBias += (Math.random()-0.5)*0.01;
+      }
+
+      if (count > 0) {
+        const avgAdv = totalAdvantage / count;
+        const avgLAct = -avgAdv; // Representación visual
+        const avgLCrit = totalLossCritic / count;
+        const avgEnt = totalEntropy / count;
+
+        // Actualizar UI
+        document.getElementById('metric-la').textContent = avgLAct.toFixed(4);
+        document.getElementById('metric-lc').textContent = avgLCrit.toFixed(4);
+        document.getElementById('metric-adv').textContent = avgAdv.toFixed(4);
+        document.getElementById('stat-ent').textContent = avgEnt.toFixed(3);
+      }
+
+      // Animación Panel Red
+      const panel = document.getElementById('global-net-panel');
+      panel.classList.remove('updating-flash');
+      void panel.offsetWidth; // trigger reflow
+      panel.classList.add('updating-flash');
+
+      updateGlobalStats();
+    }
+
+    // --- Actualizaciones de UI ---
+    function updateWorkerUI(w, probDer = null) {
+      const state = w.env.state;
+      
+      // Péndulo Visual
+      const cartPct = Math.min(100, Math.max(0, ((state.x + 2.4) / 4.8) * 100));
+      const angleDeg = state.th * (180 / Math.PI);
+      
+      const cartEl = document.getElementById(`w-cart-${w.id}`);
+      const poleEl = document.getElementById(`w-pole-${w.id}`);
+      
+      if(cartEl && poleEl) {
+          cartEl.style.left = `${cartPct}%`;
+          poleEl.style.transform = `rotate(${angleDeg}deg)`;
+      }
+
+      // Textos
+      document.getElementById(`w-ep-${w.id}`).textContent = w.localEpisodes;
+      document.getElementById(`w-rew-${w.id}`).textContent = Math.round(w.totalReward);
+      
+      if(probDer !== null) {
+        document.getElementById(`w-prob-${w.id}`).textContent = `${(probDer*100).toFixed(0)}%`;
+      }
+
+      // Progreso
+      const bar = document.getElementById(`w-buf-bar-${w.id}`);
+      const txt = document.getElementById(`w-buf-txt-${w.id}`);
+      const pct = (w.bufferSteps / STEPS_PER_UPDATE) * 100;
+      bar.style.width = `${pct}%`;
+      txt.textContent = `${w.bufferSteps} / ${STEPS_PER_UPDATE}`;
+      
+      // Color dot basado en estado
+      const dot = document.getElementById(`dot-${w.id}`);
+      if (w.bufferSteps >= STEPS_PER_UPDATE && mode === 'A2C') {
+        dot.className = "w-2 h-2 rounded-full bg-yellow-500"; // Waiting
+      } else if (state.done) {
+        dot.className = "w-2 h-2 rounded-full bg-red-500"; // Resetting
+      } else {
+        dot.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse"; // Running
+      }
+    }
+
+    function flashWorker(id) {
+      const el = document.getElementById(`worker-${id}`);
+      el.classList.add('border-emerald-500');
+      setTimeout(() => {
+        el.classList.remove('border-emerald-500');
+      }, 300);
+    }
+
+    function updateGlobalStats() {
+      document.getElementById('stat-updates').textContent = globalStats.updates;
+      document.getElementById('stat-eps').textContent = globalStats.episodes;
+      
+      // Calcular media de recompensas
+      if (globalStats.rewardBuffer.length > 0) {
+        const sum = globalStats.rewardBuffer.reduce((a, b) => a + b, 0);
+        const avg = sum / globalStats.rewardBuffer.length;
+        globalStats.rewardHistory.push(avg);
+        document.getElementById('stat-rew').textContent = avg.toFixed(1);
+        globalStats.rewardBuffer = []; // Limpiar para el siguiente bloque
+        
+        updateChart();
+      }
+    }
+
+    // --- Chart.js ---
+    function initChart() {
+      const ctx = document.getElementById('rewardChart').getContext('2d');
+      Chart.defaults.color = '#94a3b8';
+      Chart.defaults.font.family = 'Inter';
+      
+      chartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [{
+            label: 'Recompensa Promedio',
+            data: [],
+            borderColor: '#10b981', // emerald-500
+            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+            borderWidth: 2,
+            tension: 0.3,
+            fill: true,
+            pointRadius: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          plugins: { legend: { display: false }, tooltip: { enabled: false } },
+          scales: {
+            x: { display: false },
+            y: { 
+              grid: { color: 'rgba(148, 163, 184, 0.1)' },
+              beginAtZero: true
+            }
+          }
+        }
+      });
+    }
+
+    function updateChart() {
+      const maxPoints = 50;
+      const data = globalStats.rewardHistory;
+      
+      if (data.length > maxPoints) {
+        chartInstance.data.labels = Array.from({length: maxPoints}, (_, i) => i);
+        chartInstance.data.datasets[0].data = data.slice(-maxPoints);
+      } else {
+        chartInstance.data.labels = Array.from({length: data.length}, (_, i) => i);
+        chartInstance.data.datasets[0].data = data;
+      }
+      chartInstance.update();
+    }
+
+    // --- Controles de Interfaz ---
+    function setMode(newMode) {
+      mode = newMode;
+      document.getElementById('btn-a2c').className = mode === 'A2C' 
+        ? "px-4 py-2 rounded-md text-sm font-semibold transition-all bg-blue-600 text-white shadow-lg" 
+        : "px-4 py-2 rounded-md text-sm font-semibold transition-all hover:bg-slate-700 text-slate-300";
+      
+      document.getElementById('btn-a3c').className = mode === 'A3C' 
+        ? "px-4 py-2 rounded-md text-sm font-semibold transition-all bg-emerald-600 text-white shadow-lg" 
+        : "px-4 py-2 rounded-md text-sm font-semibold transition-all hover:bg-slate-700 text-slate-300";
+
+      const desc = document.getElementById('mode-desc');
+      if(mode === 'A2C') {
+          desc.innerHTML = '<strong>A2C Síncrono:</strong> Los 6 workers ejecutan 5 pasos. La red global espera a que TODOS terminen para promediar gradientes y actualizarse simultáneamente.';
+          document.getElementById('sync-status').textContent = 'Estado: Corriendo síncrono';
+          document.getElementById('sync-status').className = 'text-xs font-mono font-bold px-3 py-1 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500';
+      } else {
+          desc.innerHTML = '<strong>A3C Asíncrono:</strong> Cada worker interactúa a su propio ritmo. Al completar 5 pasos, envía sus gradientes y actualiza la red global SIN esperar a los demás.';
+          document.getElementById('sync-status').textContent = 'Estado: Corriendo asíncrono';
+          document.getElementById('sync-status').className = 'text-xs font-mono font-bold px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500';
+      }
+      
+      // Despertar workers si estaban esperando en A2C
+      workers.forEach(w => w.bufferSteps = 0);
+    }
+
+    function toggleSimulation() {
+      isRunning = !isRunning;
+      const btn = document.getElementById('btn-toggle');
+      const iconPlay = document.getElementById('icon-play');
+      const iconPause = document.getElementById('icon-pause');
+      const lbl = document.getElementById('lbl-toggle');
+
+      if (isRunning) {
+        btn.className = "w-full py-3 bg-slate-800 hover:bg-slate-700 text-red-400 border border-red-900/50 rounded-lg font-semibold flex justify-center items-center gap-2 transition-all";
+        iconPlay.classList.add('hidden');
+        iconPause.classList.remove('hidden');
+        lbl.textContent = "Pausar Entrenamiento";
+        lastTimestamp = performance.now();
+      } else {
+        btn.className = "w-full py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white rounded-lg font-semibold flex justify-center items-center gap-2 shadow-lg shadow-emerald-500/20 transition-all";
+        iconPlay.classList.remove('hidden');
+        iconPause.classList.add('hidden');
+        lbl.textContent = "Continuar Entrenamiento";
+      }
+    }
+
+    function resetSimulation() {
+      globalWeights = { actorX: 0.1, actorTh: 1.0, actorBias: 0, criticX: 0.1, criticTh: 1.0, criticBias: 0, iter: 0 };
+      globalStats = { updates: 0, episodes: 0, rewardHistory: [], rewardBuffer: [] };
+      document.getElementById('stat-updates').textContent = '0';
+      document.getElementById('stat-eps').textContent = '0';
+      document.getElementById('stat-rew').textContent = '0.0';
+      
+      if(chartInstance) {
+          chartInstance.data.labels = [];
+          chartInstance.data.datasets[0].data = [];
+          chartInstance.update();
+      }
+      
+      initWorkers();
+    }
+
+    document.getElementById('speed-slider').addEventListener('input', (e) => {
+      simulationSpeed = parseFloat(e.target.value);
+      document.getElementById('speed-val').textContent = simulationSpeed + 'x';
+    });
+
+    // --- Arranque ---
+    window.onload = () => {
+      initChart();
+      initWorkers();
+      animationFrameId = requestAnimationFrame(loop);
+    };
+
+  </script>
+</body>
+</html>
